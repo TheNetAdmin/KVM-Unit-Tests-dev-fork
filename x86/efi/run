@@ -44,14 +44,20 @@ fi
 mkdir -p "$EFI_CASE_DIR"
 cp "$EFI_SRC/$EFI_CASE.efi" "$EFI_CASE_BINARY"
 
-# Capture -initrd
+# Capture -initrd and -append
 efi_qemu_args=""
 efi_qemu_initrd=""
+efi_qemu_append=""
 while [[ -n "$1" ]]; do
 	case "$1" in
 		--initrd|-initrd)
 			shift 1
 			efi_qemu_initrd="$1"
+			shift 1
+		;;
+		--append|-append)
+			shift 1
+			efi_qemu_append="$1"
 			shift 1
 		;;
 		*)
@@ -66,6 +72,10 @@ initrd_create
 KVM_UNIT_TESTS_EFI_ENV="$EFI_TEST/$EFI_CASE/ENVS.TXT"
 mv "$KVM_UNIT_TESTS_ENV" "$KVM_UNIT_TESTS_EFI_ENV"
 [[ -f "$efi_qemu_initrd" ]] && cat "$efi_qemu_initrd" >> "$KVM_UNIT_TESTS_EFI_ENV"
+
+# Create ARGS file
+KVM_UNIT_TESTS_EFI_ARG="$EFI_TEST/$EFI_CASE/ARGS.TXT"
+echo -n "$efi_qemu_append" > "$KVM_UNIT_TESTS_EFI_ARG"
 
 # Run test case with 256MiB QEMU memory. QEMU default memory size is 128MiB.
 # After UEFI boot up and we call `LibMemoryMap()`, the largest consecutive
