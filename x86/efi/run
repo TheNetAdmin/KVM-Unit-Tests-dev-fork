@@ -12,6 +12,7 @@ if [ ! -f config.mak ]; then
 	exit 2
 fi
 source config.mak
+source scripts/arch-run.bash
 
 : "${EFI_SRC:=$(realpath "$(dirname "$0")/../")}"
 : "${EFI_UEFI:=/usr/share/ovmf/OVMF.fd}"
@@ -43,6 +44,29 @@ fi
 mkdir -p "$EFI_CASE_DIR"
 cp "$EFI_SRC/$EFI_CASE.efi" "$EFI_CASE_BINARY"
 
+# Capture -initrd
+efi_qemu_args=""
+efi_qemu_initrd=""
+while [[ -n "$1" ]]; do
+	case "$1" in
+		--initrd|-initrd)
+			shift 1
+			efi_qemu_initrd="$1"
+			shift 1
+		;;
+		*)
+			efi_qemu_args+=" $1"
+			shift 1
+		;;
+	esac
+done
+
+# Create ENVS file
+initrd_create
+KVM_UNIT_TESTS_EFI_ENV="$EFI_TEST/$EFI_CASE/ENVS.TXT"
+mv "$KVM_UNIT_TESTS_ENV" "$KVM_UNIT_TESTS_EFI_ENV"
+[[ -f "$efi_qemu_initrd" ]] && cat "$efi_qemu_initrd" >> "$KVM_UNIT_TESTS_EFI_ENV"
+
 # Run test case with 256MiB QEMU memory. QEMU default memory size is 128MiB.
 # After UEFI boot up and we call `LibMemoryMap()`, the largest consecutive
 # memory region is ~42MiB. Although this is sufficient for many test cases to
@@ -60,5 +84,5 @@ cp "$EFI_SRC/$EFI_CASE.efi" "$EFI_CASE_BINARY"
 	-net none \
 	-nographic \
 	-m 256 \
-	"$@" \
+	${efi_qemu_args} \
 	-smp "$EFI_SMP"

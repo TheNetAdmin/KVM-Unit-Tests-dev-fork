@@ -8,6 +8,7 @@
  */
 
 #include "efi.h"
+#include "argv.h"
 #include <libcflat.h>
 #include <asm/setup.h>
 
@@ -96,6 +97,121 @@ static void efi_exit(efi_status_t code)
 	efi_rs_call(reset_system, EFI_RESET_SHUTDOWN, code, 0, NULL);
 }
 
+static efi_status_t efi_get_volume(efi_handle_t handle,
+				   efi_file_protocol_t **volume)
+{
+	efi_guid_t loaded_image_protocol = LOADED_IMAGE_PROTOCOL_GUID;
+	efi_guid_t file_system_protocol = EFI_FILE_SYSTEM_GUID;
+	efi_loaded_image_t *loaded_image = NULL;
+	efi_simple_file_system_protocol_t *io;
+	efi_status_t status;
+
+	status = efi_bs_call(handle_protocol, handle, &loaded_image_protocol,
+			     (void **)&loaded_image);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to handle loaded image");
+		goto efi_get_volume_error;
+	}
+
+	status = efi_bs_call(handle_protocol, loaded_image->device_handle,
+			     &file_system_protocol, (void **)&io);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to handle file system protocol");
+		goto efi_get_volume_error;
+	}
+
+	status = io->open_volume(io, volume);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to open volume");
+		goto efi_get_volume_error;
+	}
+
+	return EFI_SUCCESS;
+
+efi_get_volume_error:
+	printf(" error: 0x%lx\n", status);
+	return EFI_ABORTED;
+}
+
+static efi_status_t efi_read_file(efi_file_protocol_t *volume,
+				  efi_char16_t *file_name,
+				  unsigned long *file_size, char **file_data)
+{
+	efi_guid_t file_info_guid = EFI_FILE_INFO_ID;
+	efi_file_protocol_t *file_handle = NULL;
+	struct finfo file_info;
+	unsigned long file_info_size;
+	efi_status_t status;
+
+	status = volume->open(volume, &file_handle, file_name,
+			      EFI_FILE_MODE_READ, 0);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to open file");
+		goto efi_read_file_error;
+	}
+
+	file_info_size = sizeof(file_info);
+	status = file_handle->get_info(file_handle, &file_info_guid,
+				       &file_info_size, &file_info);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to get file info");
+		goto efi_read_file_error;
+	}
+
+	*file_size = file_info.info.file_size;
+	status = efi_bs_call(allocate_pool, EFI_LOADER_DATA, *file_size + 1,
+			     (void **)file_data);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed allocate buffer");
+		goto efi_read_file_error;
+	}
+
+	status = file_handle->read(file_handle, file_size, *file_data);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to read file data");
+		goto efi_read_file_error;
+	}
+
+	status = file_handle->close(file_handle);
+	if (status != EFI_SUCCESS) {
+		printf("ERROR: failed to close file");
+		goto efi_read_file_error;
+	}
+
+	(*file_data)[*file_size] = '\0';
+
+	return EFI_SUCCESS;
+
+efi_read_file_error:
+	/*
+	 * TODO: Current printf does not support wide char (2nd byte of the each
+	 * wide char is always a '\0'), thus only the 1st character is printed.
+	 */
+	printf(" file: %ls, error: 0x%lx\n", file_name, status);
+	return EFI_ABORTED;
+}
+
+static efi_status_t efi_set_up_envs(efi_file_protocol_t *volume)
+{
+	efi_char16_t file_name[] = L"ENVS.TXT";
+	unsigned long file_size;
+	char *file_data = NULL;
+	efi_status_t status;
+
+	status = efi_read_file(volume, file_name, &file_size, &file_data);
+	if (status != EFI_SUCCESS) {
+		printf("Failed to read file\n");
+		goto efi_set_up_envs_error;
+	}
+
+	setup_env(file_data, (int)file_size);
+
+	return EFI_SUCCESS;
+
+efi_set_up_envs_error:
+	return EFI_ABORTED;
+}
+
 efi_status_t efi_main(efi_handle_t handle, efi_system_table_t *sys_tab)
 {
 	int ret;
@@ -103,11 +219,21 @@ efi_status_t efi_main(efi_handle_t handle, efi_system_table_t *sys_tab)
 	efi_bootinfo_t efi_bootinfo;
 
 	efi_system_table = sys_tab;
+	efi_file_protocol_t *volume = NULL;
 
 	/* Memory map struct values */
 	efi_memory_desc_t *map = NULL;
 	unsigned long map_size = 0, desc_size = 0, key = 0, buff_size = 0;
 	u32 desc_ver;
+
+	/* Open env and args files */
+	status = efi_get_volume(handle, &volume);
+	if (status != EFI_SUCCESS) {
+		printf("Failed to get volume\n");
+		goto efi_main_error;
+	}
+
+	efi_set_up_envs(volume);
 
 	/* Set up efi_bootinfo */
 	efi_bootinfo.mem_map.map = &map;
