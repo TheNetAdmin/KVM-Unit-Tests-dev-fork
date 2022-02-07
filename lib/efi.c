@@ -14,6 +14,7 @@
 
 /* From lib/argv.c */
 extern int __argc, __envc;
+extern const char *__args;
 extern char *__argv[100];
 extern char *__environ[200];
 
@@ -212,6 +213,28 @@ efi_set_up_envs_error:
 	return EFI_ABORTED;
 }
 
+static efi_status_t efi_set_up_args(efi_file_protocol_t *volume)
+{
+	efi_char16_t file_name[] = L"ARGS.TXT";
+	unsigned long file_size;
+	char *file_data = NULL;
+	efi_status_t status;
+
+	status = efi_read_file(volume, file_name, &file_size, &file_data);
+	if (status != EFI_SUCCESS) {
+		printf("Failed to read file\n");
+		goto efi_set_up_envs_error;
+	}
+
+	__args = file_data;
+	__setup_args();
+
+	return EFI_SUCCESS;
+
+efi_set_up_envs_error:
+	return EFI_ABORTED;
+}
+
 efi_status_t efi_main(efi_handle_t handle, efi_system_table_t *sys_tab)
 {
 	int ret;
@@ -234,6 +257,7 @@ efi_status_t efi_main(efi_handle_t handle, efi_system_table_t *sys_tab)
 	}
 
 	efi_set_up_envs(volume);
+	efi_set_up_args(volume);
 
 	/* Set up efi_bootinfo */
 	efi_bootinfo.mem_map.map = &map;
