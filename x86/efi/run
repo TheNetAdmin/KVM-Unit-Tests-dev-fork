@@ -12,6 +12,7 @@ if [ ! -f config.mak ]; then
 	exit 2
 fi
 source config.mak
+source scripts/arch-run.bash
 
 : "${EFI_SRC:=$(realpath "$(dirname "$0")/../")}"
 : "${EFI_UEFI:=/usr/share/ovmf/OVMF.fd}"
@@ -43,6 +44,40 @@ fi
 mkdir -p "$EFI_CASE_DIR"
 cp "$EFI_SRC/$EFI_CASE.efi" "$EFI_CASE_BINARY"
 
+# # Capture -initrd and -append args
+# efi_qemu_args=""
+# efi_qemu_initrd=""
+# efi_qemu_append=""
+# while [[ -n "$1" ]]; do
+# 	case "$1" in
+# 		-initrd)
+# 			shift 1
+# 			efi_qemu_initrd="$1"
+# 			shift 1
+# 		;;
+# 		-append)
+# 			shift 1
+# 			efi_qemu_append="$1"
+# 			shift 1
+# 		;;
+# 		*)
+# 			efi_qemu_args+=" $1"
+# 			shift 1
+# 		;;
+# 	esac
+# done
+
+# echo "efi_qemu_initrd: $efi_qemu_initrd"
+# echo "efi_qemu_append: $efi_qemu_append"
+# echo "efi_qemu_args:   $efi_qemu_args"
+
+# # Create default ENV initrd file
+# initrd_create
+# cat "$efi_qemu_initrd" >> "$KVM_UNIT_TESTS_ENV"
+# efi_qemu_initrd=$(cat "$KVM_UNIT_TESTS_ENV")
+# rm -f "$KVM_UNIT_TESTS_ENV"
+# echo "efi_qemu_initrd: $efi_qemu_initrd"
+
 # Run test case with 256MiB QEMU memory. QEMU default memory size is 128MiB.
 # After UEFI boot up and we call `LibMemoryMap()`, the largest consecutive
 # memory region is ~42MiB. Although this is sufficient for many test cases to
@@ -54,8 +89,10 @@ cp "$EFI_SRC/$EFI_CASE.efi" "$EFI_CASE_BINARY"
 # to x86/run. This `smp` flag overrides any previous `smp` flags (e.g.,
 # `-smp 4`). This is necessary because KVM-Unit-Tests do not currently support
 # SMP under UEFI. This last flag should be removed when this issue is resolved.
+cp "/usr/share/edk2-ovmf/x64/OVMF_VARS.fd" "$EFI_TEST/$EFI_CASE/OVMF_VARS.fd"
 "$TEST_DIR/run" \
 	-drive file="$EFI_UEFI",format=raw,if=pflash,readonly=on \
+	-drive file="$EFI_TEST/$EFI_CASE/OVMF_VARS.fd",format=raw,if=pflash \
 	-drive file.dir="$EFI_TEST/$EFI_CASE/",file.driver=vvfat,file.rw=on,format=raw,if=virtio \
 	-net none \
 	-nographic \

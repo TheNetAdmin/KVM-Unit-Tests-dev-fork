@@ -20,6 +20,18 @@ extern int main(int argc, char **argv, char **envp);
 
 efi_system_table_t *efi_system_table = NULL;
 
+efi_status_t efi_set_variable(efi_char16_t *name, efi_guid_t guid, u32 attr, char *data)
+{
+	printf("DEBUG: strlen(data)=%lu\n", strlen(data));
+	return efi_rs_call(set_variable, name, &guid, attr, strlen(data), (void *) data);
+}
+
+efi_status_t efi_get_variable(efi_char16_t *name, efi_guid_t guid, unsigned long *data_size, void *data)
+{
+	u32 attr = 0;
+	return efi_rs_call(get_variable, name, &guid, &attr, data_size, data);
+}
+
 static void efi_free_pool(void *ptr)
 {
 	efi_bs_call(free_pool, ptr);
@@ -96,6 +108,22 @@ static void efi_exit(efi_status_t code)
 	efi_rs_call(reset_system, EFI_RESET_SHUTDOWN, code, 0, NULL);
 }
 
+static void efi_set_default_variable(void)
+{
+	efi_status_t status;
+	unsigned long data_size;
+	void *data = NULL;
+	char empty_data[] = "empty";
+	efi_char16_t initrd_name[] = L"qemu_initrd";
+	u32 attr = EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS;
+	
+	status = efi_get_variable(initrd_name, QEMU_INITRD_GUID, &data_size, data);
+	if (status == EFI_NOT_FOUND) {
+		status = efi_set_variable(initrd_name, QEMU_INITRD_GUID, attr, empty_data);
+		assert(status == EFI_SUCCESS);
+	}
+}
+
 efi_status_t efi_main(efi_handle_t handle, efi_system_table_t *sys_tab)
 {
 	int ret;
@@ -123,6 +151,8 @@ efi_status_t efi_main(efi_handle_t handle, efi_system_table_t *sys_tab)
 		printf("Failed to get memory map\n");
 		goto efi_main_error;
 	}
+
+	efi_set_default_variable();
 
 	/* 
 	 * Exit EFI boot services, let kvm-unit-tests take full control of the
